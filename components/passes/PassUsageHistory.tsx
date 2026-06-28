@@ -32,30 +32,37 @@ export default function PassUsageHistory({ passName, usages, onClose }: Props) {
             </div>
           ) : (
             <ul className="divide-y divide-gray-50">
-              {usages.map((u, i) => (
-                <li key={u.id} className="flex items-center gap-4 px-6 py-3.5 hover:bg-gray-50">
-                  <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center text-xs text-gray-500 font-medium shrink-0">
-                    {i + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-800">{u.program}</span>
-                      <span className="text-xs text-gray-400">{u.instructor}</span>
+              {usages.map((u) => {
+                const isRestore = u.actionType === '복구';
+                return (
+                  <li key={u.id} className="flex items-center gap-3 px-6 py-3.5 hover:bg-gray-50">
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${isRestore ? 'bg-[#EAF4FA] text-[#2F80A7] border-[#BDD9EA]' : 'bg-[#FDECEA] text-[#C24132] border-[#F5B8B0]'}`}>
+                      {isRestore ? '복구' : '차감'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-800">{u.program || '—'}</span>
+                        <span className="text-xs text-gray-400">{u.instructor}</span>
+                        {u.reason && <span className="text-xs text-gray-400">· {u.reason}</span>}
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-0.5 truncate">예약 {u.reservationId || '—'}{u.memo ? ` · ${u.memo}` : ''}</p>
                     </div>
-                    {u.memo && <p className="text-xs text-gray-400 mt-0.5 truncate">{u.memo}</p>}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-gray-500">{u.usedDate}</p>
-                    <p className="text-xs font-semibold text-[#2F6F5F]">-{u.deductCount}회</p>
-                  </div>
-                </li>
-              ))}
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-gray-500">{u.usedDate}</p>
+                      <p className={`text-xs font-semibold ${isRestore ? 'text-[#2F80A7]' : 'text-[#C24132]'}`}>{isRestore ? '+' : '-'}{u.deductCount}회</p>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
 
         <div className="border-t border-gray-100 px-6 py-3 bg-gray-50 shrink-0">
-          <p className="text-xs text-gray-400">총 {usages.length}회 사용 · 차감 합계 {usages.reduce((s, u) => s + u.deductCount, 0)}회</p>
+          <p className="text-xs text-gray-400">
+            차감 {usages.filter((u) => u.actionType !== '복구').reduce((s, u) => s + u.deductCount, 0)}회 ·
+            복구 {usages.filter((u) => u.actionType === '복구').reduce((s, u) => s + u.deductCount, 0)}회
+          </p>
         </div>
       </div>
     </div>

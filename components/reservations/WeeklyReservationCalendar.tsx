@@ -7,6 +7,8 @@ import { SLOT_PX, getReservationTiming, getReservationBlockHeight, timeToMinutes
 import ReservationCell from './ReservationCell';
 import ReservationDetailModal from './ReservationDetailModal';
 import ReservationForm from './ReservationForm';
+import DeleteReservationConfirmModal from './DeleteReservationConfirmModal';
+import { useReservation } from '@/context/ReservationContext';
 import { ChevronLeft, ChevronRight, CalendarDays, SlidersHorizontal, X, AlertTriangle } from 'lucide-react';
 
 interface CalendarFilter {
@@ -31,10 +33,12 @@ interface Props {
 
 export default function WeeklyReservationCalendar({ reservations, onChange, compact = false, onReservationSelect }: Props) {
   const today = getToday();
+  const { saveEditedReservation, softDeleteReservation } = useReservation();
   const [baseDate, setBaseDate] = useState(today);
   const [filter, setFilter] = useState<CalendarFilter>(defaultFilter);
   const [filterOpen, setFilterOpen] = useState(false);
   const [detailTarget, setDetailTarget] = useState<Reservation | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Reservation | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Reservation | null>(null);
   const [prefillDate, setPrefillDate] = useState('');
@@ -42,6 +46,7 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
 
   const weekDays = useMemo(() => { const all = getWeekDays(baseDate); return compact ? all.slice(0, 5) : all; }, [baseDate, compact]);
   const filtered = useMemo(() => reservations.filter((r) => {
+    if (r.isActive === false) return false; // 삭제(비활성)된 예약 숨김
     if (filter.instructor !== '전체' && r.instructor !== filter.instructor) return false;
     if (filter.room !== '전체' && r.room !== filter.room) return false;
     if (filter.program !== '전체' && r.program !== filter.program) return false;
@@ -103,10 +108,17 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
     }
   }
   function handleSave(r: Reservation) {
-    if (!onChange) return;
-    if (editTarget) onChange(reservations.map((x) => (x.id === r.id ? r : x)));
-    else onChange([...reservations, r]);
+    if (editTarget) saveEditedReservation(r); // 상태 전환 시 이용권 차감/복구 자동 처리
+    else if (onChange) onChange([...reservations, r]);
     setFormOpen(false); setEditTarget(null); setPrefillDate(''); setPrefillTime('');
+  }
+
+  /** 삭제 확정 — soft delete + (차감되어 있으면) 이용권 복구 */
+  function handleConfirmDelete(reason: string) {
+    if (!deleteTarget) return;
+    softDeleteReservation(deleteTarget.id, reason);
+    setDeleteTarget(null);
+    setDetailTarget(null);
   }
 
   const chipCls = (active: boolean) => `px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${active ? 'bg-[#2F80A7] text-white' : 'bg-white border border-[#E5E7EB] text-[#374151] hover:border-[#2F80A7] hover:text-[#2F80A7]'}`;
@@ -249,7 +261,8 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
         ))}
       </div>
 
-      {detailTarget && <ReservationDetailModal reservation={detailTarget} onClose={() => setDetailTarget(null)} onEdit={handleEdit} />}
+      {detailTarget && <ReservationDetailModal reservation={detailTarget} onClose={() => setDetailTarget(null)} onEdit={handleEdit} onDelete={onChange ? (r) => setDeleteTarget(r) : undefined} />}
+      {deleteTarget && <DeleteReservationConfirmModal reservation={deleteTarget} onConfirm={handleConfirmDelete} onClose={() => setDeleteTarget(null)} />}
       {formOpen && (
         <ReservationForm
           reservation={editTarget ?? (prefillDate ? { id: `r${Date.now()}`, date: prefillDate, time: prefillTime, startTime: prefillTime, customerId: '', customerName: '', customerPhone: '', program: '패시브스트레칭', instructor: '김보형', room: '1번룸', status: '예약완료', paymentStatus: '미결제', memo: '', cancelReason: '', createdAt: today } as Reservation : null)}

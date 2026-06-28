@@ -34,6 +34,23 @@ export interface Reservation {
   isEndTimeManual?: boolean;
   /** 중복(시간 겹침) 경고를 무시하고 강제 저장했는지 */
   overlapApproved?: boolean;
+  // ── 이용권 연동 필드 (누적 추가) ──
+  /** 연결된 이용권 id */
+  passId?: string;
+  /** 연결된 이용권명 (표시용 스냅샷) */
+  passName?: string;
+  /** 이용권이 차감되었는지 (수업완료 시 true) */
+  passDeducted?: boolean;
+  /** 차감 시각 */
+  passDeductedAt?: string;
+  /** 차감 PassUsage id */
+  passUsageId?: string;
+  /** 복구 PassUsage id (수업완료취소/예약삭제 복구 시) */
+  restoreUsageId?: string;
+  /** 예약 삭제 시 이용권을 복구했는지 (중복 복구 방지) */
+  restoredPassOnDelete?: boolean;
+  /** 삭제 사유 */
+  deletedReason?: string;
   // ── 누적 관리 필드 ──
   isActive: boolean;
   updatedAt: string;

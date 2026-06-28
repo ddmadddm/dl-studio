@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import CustomerSearchSelect from '@/components/customers/CustomerSearchSelect';
 import CustomerForm from '@/components/customers/CustomerForm';
+import CustomerPassSelector from './CustomerPassSelector';
 import { useSettings } from '@/context/SettingsContext';
 import {
   TIME_SLOTS, isValidTimeSlot, normalizeTime, generateTimeSlots,
@@ -73,6 +74,9 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
   // 레슨시간 직접입력 모드 여부
   const [isCustomDuration, setIsCustomDuration] = useState(!DURATIONS.includes(initDuration));
 
+  // 빈 칸 클릭으로 들어온 prefill 예약은 customerId 가 없으므로 "신규"로 본다
+  const isNew = !reservation?.customerId;
+
   const startTime = form.startTime ?? form.time;
   const duration  = form.durationMinutes ?? 60;
   const endTime   = form.endTime ?? calculateEndTime(startTime, duration);
@@ -122,7 +126,12 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
   const [showNewCustomer, setShowNewCustomer] = useState(false);
 
   function handleCustomerSelect(c: { id: string; name: string; phone: string } | null) {
-    setForm({ ...form, customerId: c?.id ?? '', customerName: c?.name ?? '', customerPhone: c?.phone ?? '' });
+    // 고객이 바뀌면 이용권 선택 초기화
+    setForm({ ...form, customerId: c?.id ?? '', customerName: c?.name ?? '', customerPhone: c?.phone ?? '', passId: undefined, passName: undefined });
+  }
+
+  function handlePassSelect(passId: string | null, passName: string | null) {
+    setForm((f) => ({ ...f, passId: passId ?? undefined, passName: passName ?? undefined }));
   }
 
   function handleNewCustomerSave(c: Customer) {
@@ -178,7 +187,7 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
       <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
-            <h2 className="text-lg font-bold text-gray-900">{reservation ? '예약 수정' : '예약 추가'}</h2>
+            <h2 className="text-lg font-bold text-gray-900">{isNew ? '예약 추가' : '예약 수정'}</h2>
             <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100"><X size={20} /></button>
           </div>
 
@@ -201,6 +210,17 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
                 </div>
               )}
             </div>
+
+            {/* 고객 이용권 현황 + 사용할 이용권 선택 */}
+            {form.customerId && (
+              <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-3">
+                <CustomerPassSelector
+                  customerId={form.customerId}
+                  selectedPassId={form.passId}
+                  onSelect={handlePassSelect}
+                />
+              </div>
+            )}
 
             {/* 날짜·시작시간 */}
             <div className="grid grid-cols-2 gap-4">
@@ -345,7 +365,7 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
             <div className="flex gap-3 pt-2">
               <Button type="button" variant="outline" onClick={onClose} className="flex-1 border-gray-200">취소</Button>
               <Button type="submit" className="flex-1 bg-gray-900 hover:bg-gray-700 text-white">
-                {reservation ? '수정 완료' : '예약 추가'}
+                {isNew ? '예약 추가' : '수정 완료'}
               </Button>
             </div>
           </form>
