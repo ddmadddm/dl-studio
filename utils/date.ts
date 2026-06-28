@@ -1,9 +1,8 @@
 import { Reservation } from '@/types/reservation';
+import { TIME_SLOTS, normalizeTime, isValidTimeSlot, getReservationStart } from '@/utils/time';
 
-export const TIME_SLOTS = [
-  '09:00', '10:00', '11:00', '12:00',
-  '13:00', '14:00', '15:00', '16:00', '17:00', '18:00',
-];
+// 시간 슬롯/검증 유틸은 utils/time.ts 로 이전 — 기존 import 경로 호환을 위해 재노출
+export { TIME_SLOTS, normalizeTime, isValidTimeSlot };
 
 export const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -54,13 +53,34 @@ export function formatDayLabel(dateStr: string): { mmdd: string; dow: string } {
   return { mmdd, dow };
 }
 
-/** 특정 날짜·시간의 예약 목록 */
+/**
+ * 특정 날짜·시간 슬롯의 예약 목록.
+ * 시간을 30분 단위로 정확히 매칭한다(반올림하지 않음).
+ * - 10:30 예약 → 10:30 슬롯에만 표시
+ * - 10:00 예약 → 10:00 슬롯에만 표시
+ * 30분 단위가 아니거나 범위 밖인 시간은 어떤 슬롯에도 매칭되지 않으며,
+ * getUnslottedReservations 로 따로 "시간 형식 확인 필요" 처리한다.
+ */
 export function getReservationsByDateTime(
   reservations: Reservation[],
   date: string,
   time: string
 ): Reservation[] {
-  return reservations.filter((r) => r.date === date && r.time === time);
+  const slot = normalizeTime(time);
+  return reservations.filter(
+    (r) => r.date === date && getReservationStart(r) === slot
+  );
+}
+
+/** 주어진 날짜들 중 시작 시간이 30분 단위 슬롯에 들어맞지 않는("시간 형식 확인 필요") 예약 */
+export function getUnslottedReservations(
+  reservations: Reservation[],
+  dates: string[]
+): Reservation[] {
+  const dateSet = new Set(dates);
+  return reservations.filter(
+    (r) => dateSet.has(r.date) && !isValidTimeSlot(getReservationStart(r))
+  );
 }
 
 /** 주간 예약 수 */

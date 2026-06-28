@@ -10,6 +10,7 @@ import { CustomerProvider } from '@/context/CustomerContext';
 import { TransactionProvider } from '@/context/TransactionContext';
 import { SalesProvider } from '@/context/SalesContext';
 import { PrescriptionProvider } from '@/context/PrescriptionContext';
+import { ReservationProvider } from '@/context/ReservationContext';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TransactionProvider>
         <SalesProvider>
         <PrescriptionProvider>
+        <ReservationProvider>
           <div className="flex min-h-screen">
             <Sidebar />
             <div className="flex-1 flex flex-col min-h-screen">
@@ -51,6 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </main>
             </div>
           </div>
+        </ReservationProvider>
         </PrescriptionProvider>
         </SalesProvider>
         </TransactionProvider>

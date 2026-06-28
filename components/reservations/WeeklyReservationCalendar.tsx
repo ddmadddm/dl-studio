@@ -2,11 +2,12 @@
 
 import { useState, useMemo } from 'react';
 import { Reservation, ReservationStatus, InstructorType, RoomType, ProgramType } from '@/types/reservation';
-import { getWeekDays, moveWeek, formatDayLabel, getToday, getReservationsByDateTime, TIME_SLOTS } from '@/utils/date';
+import { getWeekDays, moveWeek, formatDayLabel, getToday, getUnslottedReservations, TIME_SLOTS } from '@/utils/date';
+import { SLOT_PX, getReservationTiming, getReservationBlockHeight, timeToMinutes } from '@/utils/time';
 import ReservationCell from './ReservationCell';
 import ReservationDetailModal from './ReservationDetailModal';
 import ReservationForm from './ReservationForm';
-import { ChevronLeft, ChevronRight, CalendarDays, SlidersHorizontal, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, SlidersHorizontal, X, AlertTriangle } from 'lucide-react';
 
 interface CalendarFilter {
   instructor: InstructorType | '전체';
@@ -48,7 +49,43 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
     return true;
   }), [reservations, filter]);
 
-  const timeSlots = compact ? TIME_SLOTS.slice(0, 8) : TIME_SLOTS;
+  // 30분 단위 슬롯. 미리보기(compact)는 09:00~16:30 구간만 노출
+  const timeSlots = compact ? TIME_SLOTS.slice(0, 16) : TIME_SLOTS;
+  // 30분 단위에 맞지 않는("시간 형식 확인 필요") 이번 주 예약
+  const unslotted = useMemo(() => getUnslottedReservations(filtered, weekDays), [filtered, weekDays]);
+
+  // 슬롯 → 행 인덱스
+  const slotIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    timeSlots.forEach((t, i) => m.set(t, i));
+    return m;
+  }, [timeSlots]);
+
+  // 요일별 예약 블록 배치 (시간 길이 → 높이, 겹치면 가로 레인 분할)
+  const dayLayouts = useMemo(() => {
+    const out: Record<string, { blocks: { r: Reservation; top: number; height: number; lane: number }[]; laneCount: number }> = {};
+    for (const date of weekDays) {
+      const items = filtered
+        .filter((r) => r.date === date)
+        .map((r) => {
+          const t = getReservationTiming(r);
+          return { r, start: t.start, duration: t.duration, startMin: timeToMinutes(t.start), endMin: timeToMinutes(t.end) };
+        })
+        .filter((it) => slotIndex.has(it.start)) // 시작이 보이는 슬롯에 있는 예약만 (나머지는 배너 처리)
+        .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+
+      const laneEnd: number[] = []; // 레인별 마지막 종료 분
+      const blocks = items.map((it) => {
+        let lane = laneEnd.findIndex((e) => e <= it.startMin); // 겹치지 않는 첫 레인 재사용
+        if (lane === -1) { lane = laneEnd.length; laneEnd.push(it.endMin); }
+        else laneEnd[lane] = it.endMin;
+        return { r: it.r, top: slotIndex.get(it.start)! * SLOT_PX, height: getReservationBlockHeight(it.duration), lane };
+      });
+      out[date] = { blocks, laneCount: Math.max(1, laneEnd.length) };
+    }
+    return out;
+  }, [filtered, weekDays, slotIndex]);
+
   const hasFilter = Object.values(filter).some((v) => v !== '전체');
   const activeCount = Object.values(filter).filter((v) => v !== '전체').length;
   const { mmdd: startLabel } = formatDayLabel(weekDays[0]);
@@ -115,6 +152,30 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
         </div>
       )}
 
+      {/* 시간 형식 확인 필요 (30분 단위 슬롯에 맞지 않는 예약) */}
+      {unslotted.length > 0 && (
+        <div className="border-b border-[#E5E7EB] bg-[#FFF6D8] px-5 py-3">
+          <div className="flex items-center gap-1.5 text-[#92600A] text-xs font-semibold mb-2">
+            <AlertTriangle size={13} />
+            시간 형식 확인 필요 ({unslotted.length})
+            <span className="font-normal text-[#A17400]">— 30분 단위(예: 10:00, 10:30)가 아니라 캘린더에 배치할 수 없습니다. 클릭해 시간을 수정하세요.</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {unslotted.map((r) => {
+              const { mmdd } = formatDayLabel(r.date);
+              return (
+                <button key={r.id} onClick={() => handleReservationClick(r)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-[#E9C46A] text-xs text-[#92600A] hover:bg-[#FFFBEE] transition-colors">
+                  <span className="font-semibold">{r.customerName || '이름없음'}</span>
+                  <span className="text-[#A17400]">{mmdd}</span>
+                  <span className="font-mono bg-[#FFF6D8] px-1 rounded">{r.time || '시간없음'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 그리드 */}
       <div className="overflow-x-auto bg-[#F4F6F8]">
         <div style={{ minWidth: compact ? 640 : 800 }}>
@@ -135,34 +196,52 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
             })}
           </div>
 
-          {/* 시간 슬롯 */}
-          {timeSlots.map((time, rowIdx) => (
-            <div key={time} className={`grid border-b border-[#E5E7EB] last:border-0 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}`} style={{ gridTemplateColumns: `60px repeat(${weekDays.length}, 1fr)` }}>
-              <div className="flex items-start justify-end pr-3 pt-2.5 border-r border-[#E5E7EB]">
-                <span className="text-xs text-[#9CA3AF] font-medium">{time}</span>
-              </div>
-              {weekDays.map((date) => {
-                const items = getReservationsByDateTime(filtered, date, time);
-                const isToday = date === today;
+          {/* 본문: 시간축 + 요일 컬럼 (예약은 길이에 맞는 세로 컬러 블록) */}
+          <div className="grid" style={{ gridTemplateColumns: `60px repeat(${weekDays.length}, 1fr)` }}>
+            {/* 시간 라벨 컬럼 */}
+            <div className="border-r border-[#E5E7EB] bg-white">
+              {timeSlots.map((time) => {
+                const isHour = time.endsWith(':00');
                 return (
-                  <div key={date} onClick={() => items.length === 0 && handleCellClick(date, time)}
-                    className={`border-l border-[#E5E7EB] p-1.5 min-h-[66px] transition-colors ${isToday ? 'bg-[#EAF4FA]/30' : ''} ${items.length === 0 ? 'cursor-pointer group hover:bg-[#EAF4FA]/50' : 'cursor-default'}`}>
-                    {items.length === 0 ? (
-                      <div className="w-full h-full min-h-[52px] rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="text-xs text-[#2F80A7] font-medium">+ 예약</span>
-                      </div>
-                    ) : items.map((r) => (<ReservationCell key={r.id} reservation={r} onClick={handleReservationClick} compact={compact} />))}
+                  <div key={time} className="flex items-start justify-end pr-3 pt-1" style={{ height: SLOT_PX }}>
+                    <span className={`text-xs font-medium ${isHour ? 'text-[#6B7280]' : 'text-[#C7CDD4]'}`}>{time}</span>
                   </div>
                 );
               })}
             </div>
-          ))}
+
+            {/* 요일별 컬럼 */}
+            {weekDays.map((date) => {
+              const isToday = date === today;
+              const layout = dayLayouts[date];
+              const widthPct = 100 / layout.laneCount;
+              return (
+                <div key={date} className="relative border-l border-[#E5E7EB]" style={{ height: timeSlots.length * SLOT_PX }}>
+                  {/* 배경 슬롯 (빈 칸 클릭 → 예약 추가) */}
+                  {timeSlots.map((time, i) => (
+                    <div key={time} onClick={() => handleCellClick(date, time)}
+                      className={`absolute left-0 right-0 border-b border-[#E5E7EB] cursor-pointer group transition-colors hover:bg-[#EAF4FA]/60 ${isToday ? 'bg-[#EAF4FA]/30' : i % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}`}
+                      style={{ top: i * SLOT_PX, height: SLOT_PX }}>
+                      <span className="absolute inset-0 flex items-center justify-center text-xs text-[#2F80A7] font-medium opacity-0 group-hover:opacity-100 transition-opacity">+ 예약</span>
+                    </div>
+                  ))}
+                  {/* 예약 블록 */}
+                  {layout.blocks.map((b) => (
+                    <div key={b.r.id} className="absolute px-0.5"
+                      style={{ top: b.top + 1, height: b.height - 2, left: `${b.lane * widthPct}%`, width: `${widthPct}%` }}>
+                      <ReservationCell reservation={b.r} onClick={handleReservationClick} compact={compact} fill />
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {/* 범례 */}
       <div className="flex flex-wrap items-center gap-4 px-5 py-3 bg-[#F4F6F8] border-t border-[#E5E7EB]">
-        {[['예약완료','#2F80A7'],['수업완료','#7AC29A'],['변경요청','#E9C46A'],['노쇼','#E76F51'],['취소','#9CA3AF']].map(([label, color]) => (
+        {[['예약완료','#2F80A7'],['수업완료','#7AC29A'],['변경요청','#E9C46A'],['노쇼','#E76F51'],['취소','#9CA3AF'],['필드·처방전','#7C5CFC']].map(([label, color]) => (
           <div key={label} className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
             <span className="text-xs text-[#6B7280]">{label}</span>
@@ -173,7 +252,7 @@ export default function WeeklyReservationCalendar({ reservations, onChange, comp
       {detailTarget && <ReservationDetailModal reservation={detailTarget} onClose={() => setDetailTarget(null)} onEdit={handleEdit} />}
       {formOpen && (
         <ReservationForm
-          reservation={editTarget ?? (prefillDate ? { id: `r${Date.now()}`, date: prefillDate, time: prefillTime, customerId: '', customerName: '', customerPhone: '', program: '패시브스트레칭', instructor: '김보형', room: '1번룸', status: '예약완료', paymentStatus: '미결제', memo: '', cancelReason: '', createdAt: today } as Reservation : null)}
+          reservation={editTarget ?? (prefillDate ? { id: `r${Date.now()}`, date: prefillDate, time: prefillTime, startTime: prefillTime, customerId: '', customerName: '', customerPhone: '', program: '패시브스트레칭', instructor: '김보형', room: '1번룸', status: '예약완료', paymentStatus: '미결제', memo: '', cancelReason: '', createdAt: today } as Reservation : null)}
           existingReservations={reservations}
           onSave={handleSave}
           onClose={() => { setFormOpen(false); setEditTarget(null); setPrefillDate(''); setPrefillTime(''); }}

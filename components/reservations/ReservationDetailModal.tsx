@@ -3,6 +3,7 @@
 import { Reservation, ReservationStatus } from '@/types/reservation';
 import { X, Phone, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getReservationTiming } from '@/utils/time';
 
 const statusStyle: Record<ReservationStatus, string> = {
   예약완료: 'bg-gray-100 text-gray-700 border-gray-200',
@@ -25,6 +26,7 @@ interface Props {
 }
 
 export default function ReservationDetailModal({ reservation: r, onClose, onEdit }: Props) {
+  const { start, end, duration } = getReservationTiming(r);
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
@@ -59,7 +61,8 @@ export default function ReservationDetailModal({ reservation: r, onClose, onEdit
           <div className="grid grid-cols-2 gap-4">
             {[
               ['예약일', r.date],
-              ['예약시간', r.time],
+              ['예약시간', `${start} ~ ${end}`],
+              ['레슨시간', `${duration}분`],
               ['프로그램', r.program],
               ['담당강사', r.instructor],
               ['장소', r.room],

@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { mockReservations } from '@/data/mockReservations';
 import { usePass } from '@/context/PassContext';
 import { useCustomer } from '@/context/CustomerContext';
 import { useSales, sumRevenue, sumOutstanding } from '@/context/SalesContext';
 import { useTransaction } from '@/context/TransactionContext';
 import { usePrescription } from '@/context/PrescriptionContext';
+import { useReservation } from '@/context/ReservationContext';
 import { getPrescriptionStatusBadge, scoreColor } from '@/utils/prescriptionAnalysis';
 import { Reservation } from '@/types/reservation';
 import StatCard from '@/components/dashboard/StatCard';
@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const { activeSales } = useSales();
   const { activeTransactions } = useTransaction();
   const { activePrescriptions } = usePrescription();
+  const { reservations, setReservations } = useReservation();
 
   // 캘린더에서 선택된 예약
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
@@ -82,13 +83,14 @@ export default function DashboardPage() {
     <div className="space-y-6">
 
       {/* ── 예약 요약 ── */}
-      <ReservationSummary reservations={mockReservations} />
+      <ReservationSummary reservations={reservations} />
 
       {/* ── 주간 캘린더(좌) + 고객 상세 패널(우) ── */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5 items-start">
         {/* 캘린더: 예약 클릭 시 오른쪽 패널에 표시 */}
         <WeeklyReservationCalendar
-          reservations={mockReservations}
+          reservations={reservations}
+          onChange={setReservations}
           compact={true}
           onReservationSelect={setSelectedReservation}
         />
@@ -105,7 +107,7 @@ export default function DashboardPage() {
             />
           ) : (
             <TodayReservations
-              reservations={mockReservations}
+              reservations={reservations}
               onReservationClick={setSelectedReservation}
             />
           )}

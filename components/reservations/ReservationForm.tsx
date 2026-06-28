@@ -11,6 +11,11 @@ import { Textarea } from '@/components/ui/textarea';
 import CustomerSearchSelect from '@/components/customers/CustomerSearchSelect';
 import CustomerForm from '@/components/customers/CustomerForm';
 import { useSettings } from '@/context/SettingsContext';
+import {
+  TIME_SLOTS, isValidTimeSlot, normalizeTime, generateTimeSlots,
+  calculateEndTime, getDurationMinutes, findOverlaps,
+  RESERVATION_TIME_CONFIG,
+} from '@/utils/time';
 
 interface Props {
   reservation: Reservation | null;
@@ -22,6 +27,7 @@ interface Props {
 
 const statuses: ReservationStatus[]        = ['예약완료', '수업완료', '취소', '노쇼', '변경요청'];
 const payStatuses: ReservationPaymentStatus[] = ['미결제', '결제완료', '부분결제'];
+const DURATIONS = RESERVATION_TIME_CONFIG.defaultLessonDurations; // [50, 60, 90, 120]
 
 export default function ReservationForm({ reservation, onSave, onClose, existingReservations = [] }: Props) {
   const today = new Date().toISOString().split('T')[0];
@@ -32,11 +38,22 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
   const instructorLabels = getLabels('instructor');
   const locationLabels   = getLabels('location');
 
+  // 기존 데이터 호환: startTime ?? time
+  const initStart    = normalizeTime(reservation?.startTime ?? reservation?.time ?? '10:00');
+  const initDuration = reservation?.durationMinutes ?? 60;
+  const initManual   = reservation?.isEndTimeManual ?? false;
+  const initEnd      = normalizeTime(reservation?.endTime ?? calculateEndTime(initStart, initDuration));
+
   const [form, setForm] = useState<Reservation>(
     reservation ?? {
       id: `r${Date.now()}`,
       date: today,
-      time: '10:00',
+      time: initStart,
+      startTime: initStart,
+      endTime: initEnd,
+      durationMinutes: initDuration,
+      isEndTimeManual: initManual,
+      overlapApproved: false,
       customerId: '',
       customerName: '',
       customerPhone: '',
@@ -52,6 +69,50 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
       updatedAt: new Date().toISOString(),
     }
   );
+
+  // 레슨시간 직접입력 모드 여부
+  const [isCustomDuration, setIsCustomDuration] = useState(!DURATIONS.includes(initDuration));
+
+  const startTime = form.startTime ?? form.time;
+  const duration  = form.durationMinutes ?? 60;
+  const endTime   = form.endTime ?? calculateEndTime(startTime, duration);
+  const isManual  = form.isEndTimeManual ?? false;
+
+  /** 시작 시간 변경 — 수동 모드가 아니면 종료 시간 재계산 */
+  function handleStartChange(t: string) {
+    setForm((f) => ({
+      ...f, startTime: t, time: t,
+      endTime: (f.isEndTimeManual ? f.endTime : calculateEndTime(t, f.durationMinutes ?? 60)),
+    }));
+  }
+
+  /** 레슨 시간 변경 — 수동 모드가 아니면 종료 시간 재계산 */
+  function handleDurationChange(d: number) {
+    if (!d || d <= 0) return;
+    setForm((f) => ({
+      ...f, durationMinutes: d,
+      endTime: (f.isEndTimeManual ? f.endTime : calculateEndTime(f.startTime ?? f.time, d)),
+    }));
+  }
+
+  /** "종료 시간 직접 수정" 토글 */
+  function handleManualToggle(checked: boolean) {
+    setForm((f) => {
+      const s = f.startTime ?? f.time;
+      if (checked) return { ...f, isEndTimeManual: true };
+      // 해제 → 시작+레슨시간 기준 자동 재계산
+      const auto = calculateEndTime(s, f.durationMinutes ?? 60);
+      return { ...f, isEndTimeManual: false, endTime: auto };
+    });
+  }
+
+  /** 종료 시간 수동 선택 — durationMinutes 도 함께 갱신해 블록 높이를 일치시킴 */
+  function handleEndChange(t: string) {
+    setForm((f) => {
+      const s = f.startTime ?? f.time;
+      return { ...f, endTime: t, isEndTimeManual: true, durationMinutes: getDurationMinutes(s, t) };
+    });
+  }
 
   const selectedCustomer =
     form.customerId && form.customerName
@@ -78,32 +139,38 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
     e.preventDefault();
     if (!form.customerId || !form.customerName) return alert('고객을 선택해주세요.');
     if (!form.date) return alert('예약일을 선택해주세요.');
-    if (!form.time) return alert('예약시간을 선택해주세요.');
+    if (!startTime) return alert('시작 시간을 선택해주세요.');
+    if (!endTime || getDurationMinutes(startTime, endTime) <= 0) return alert('종료 시간이 시작 시간보다 늦어야 합니다.');
 
-    // 중복 예약(시간 충돌) 검사 — 같은 날짜+시간에 동일 강사 또는 동일 장소
-    // (취소/노쇼 예약과 본인은 제외)
-    const conflict = existingReservations.find(
-      (r) =>
-        r.isActive &&
-        r.id !== form.id &&
-        r.status !== '취소' &&
-        r.status !== '노쇼' &&
-        r.date === form.date &&
-        r.time === form.time &&
-        (r.instructor === form.instructor || r.room === form.room)
-    );
-    if (conflict) {
-      const reasons: string[] = [];
-      if (conflict.instructor === form.instructor) reasons.push(`강사(${form.instructor})`);
-      if (conflict.room === form.room) reasons.push(`장소(${form.room})`);
-      const ok = confirm(
-        `${form.date} ${form.time}에 ${reasons.join(', ')} 중복 예약이 있습니다.\n` +
-        `(${conflict.customerName} · ${conflict.program})\n\n그래도 저장할까요?`
-      );
+    // 저장 직전 시간 필드 정규화 (time 은 legacy 호환용으로 startTime 과 동기화)
+    let next: Reservation = {
+      ...form,
+      startTime,
+      endTime,
+      time: startTime,
+      durationMinutes: duration,
+      isEndTimeManual: isManual,
+      overlapApproved: form.overlapApproved ?? false,
+    };
+
+    // 중복 예약(시간 겹침) 검사 — 같은 날짜에 시간이 겹치는 같은 강사/같은 장소
+    const { instructorConflict, roomConflict } = findOverlaps(next, existingReservations);
+    if (instructorConflict || roomConflict) {
+      const lines: string[] = [];
+      if (instructorConflict) {
+        const o = instructorConflict;
+        lines.push(`• 해당 시간에 같은 강사(${next.instructor}) 예약이 있습니다. (${o.customerName} · ${normalizeTime(o.startTime ?? o.time)}~${normalizeTime(o.endTime ?? '')})`);
+      }
+      if (roomConflict) {
+        const o = roomConflict;
+        lines.push(`• 해당 시간에 같은 장소(${next.room}) 예약이 있습니다. (${o.customerName} · ${normalizeTime(o.startTime ?? o.time)}~${normalizeTime(o.endTime ?? '')})`);
+      }
+      const ok = confirm(`${lines.join('\n')}\n\n그래도 저장할까요?`);
       if (!ok) return;
+      next = { ...next, overlapApproved: true };
     }
 
-    onSave(form);
+    onSave(next);
   }
 
   return (
@@ -135,16 +202,82 @@ export default function ReservationForm({ reservation, onSave, onClose, existing
               )}
             </div>
 
-            {/* 날짜·시간 */}
+            {/* 날짜·시작시간 */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>예약일 *</Label>
                 <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="border-gray-200" />
               </div>
               <div className="space-y-1.5">
-                <Label>예약시간 *</Label>
-                <Input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} className="border-gray-200" />
+                <Label>시작 시간 *</Label>
+                <select
+                  value={startTime}
+                  onChange={(e) => handleStartChange(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-gray-200 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+                >
+                  {/* 기존 데이터가 30분 단위가 아니면 값 보존을 위해 임시 옵션 노출 */}
+                  {startTime && !isValidTimeSlot(startTime) && (
+                    <option value={startTime}>{startTime} (확인 필요)</option>
+                  )}
+                  {TIME_SLOTS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
               </div>
+            </div>
+
+            {/* 레슨 시간 */}
+            <div className="space-y-1.5">
+              <Label>레슨 시간</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                {DURATIONS.map((d) => (
+                  <button key={d} type="button"
+                    onClick={() => { setIsCustomDuration(false); handleDurationChange(d); }}
+                    className={chip(!isCustomDuration && duration === d)}>
+                    {d}분
+                  </button>
+                ))}
+                <button type="button"
+                  onClick={() => setIsCustomDuration(true)}
+                  className={chip(isCustomDuration)}>
+                  직접입력
+                </button>
+                {isCustomDuration && (
+                  <div className="flex items-center gap-1.5">
+                    <Input type="number" min={10} step={5} value={duration}
+                      onChange={(e) => handleDurationChange(Number(e.target.value))}
+                      className="w-24 border-gray-200" />
+                    <span className="text-xs text-gray-500">분</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 종료 시간 (자동 계산 + 수동 수정) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>종료 시간</Label>
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+                  <input type="checkbox" checked={isManual} onChange={(e) => handleManualToggle(e.target.checked)} className="accent-gray-900" />
+                  종료 시간 직접 수정
+                </label>
+              </div>
+              {isManual ? (
+                <select
+                  value={endTime}
+                  onChange={(e) => handleEndChange(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-gray-200 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+                >
+                  {Array.from(new Set([endTime, ...generateTimeSlots(9, 23, RESERVATION_TIME_CONFIG.timeSlotInterval)]))
+                    .sort()
+                    .map((t) => (<option key={t} value={t}>{t}</option>))}
+                </select>
+              ) : (
+                <div className="flex h-9 w-full items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700">
+                  {startTime} ~ <span className="font-semibold mx-1">{endTime}</span>
+                  <span className="text-xs text-gray-400">(시작 +{duration}분 · 자동)</span>
+                </div>
+              )}
             </div>
 
             {/* 프로그램 (설정에서 로드) */}
